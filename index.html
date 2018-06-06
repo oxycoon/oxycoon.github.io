@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <!-- © NightDev 2016 -->
-<html><head>
-<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<html>
+    <head>
         <title>KapChat</title>
-        <meta charset="UTF-8">
-        <script src="Filer_for_KapChat/jquery.js"></script>
-        <script src="Filer_for_KapChat/punycode.js"></script>
-        <script src="Filer_for_KapChat/irc-message.js"></script>
-        <script src="Filer_for_KapChat/reconnecting-websocket.js"></script>
+        <meta charset="UTF-8" />
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.8.2/jquery.min.js"></script>
+        <script src="https://twemoji.maxcdn.com/2/twemoji.min.js?2.4"></script>
+        <script src="punycode.min.js"></script>
+        <script src="irc-message.js"></script>
+        <script src="reconnecting-websocket.min.js"></script>
         <script type="text/javascript" language="javascript">
             // Taken from http://stackoverflow.com/questions/901115/how-can-i-get-query-string-values cuz lazy
             function getParameterByName(name) {
@@ -17,7 +18,7 @@
                 return results == null ? "" : decodeURIComponent(results[1].replace(/\+/g, " "));
             }
 
-            calculateColorBackground = function (color) {
+            function calculateColorBackground(color) {
                 // Converts HEX to YIQ to judge what color background the color would look best on
                 color = String(color).replace(/[^0-9a-f]/gi, '');
                 if (color.length < 6) {
@@ -31,7 +32,7 @@
                 return (yiq >= 128) ? "dark" : "light";
             }
 
-            calculateColorReplacement = function (color, background) {
+            function calculateColorReplacement(color, background) {
                 // Modified from http://www.sitepoint.com/javascript-generate-lighter-darker-color/
                 var inputColor = color,
                     rgb = "#",
@@ -62,6 +63,30 @@
                 }
             }
 
+            function tagCSS(type, version, url) {
+                var $css = $('<style></style>');
+                $css.attr('type', 'text/css');
+                $css.html('.' + type + '-' + version + ' { background-image: url("' + url.replace('http:', 'https:') + '"); }');
+                return $css;
+            }
+
+            function transformBadges(sets) {
+                return Object.keys(sets).map(function(b) {
+                    var badge = sets[b];
+                    badge.type = b;
+                    badge.versions = Object.keys(sets[b].versions).map(function(v) {
+                        var version = sets[b].versions[v];
+                        version.type = v;
+                        return version;
+                    });
+                    return badge;
+                });
+            }
+
+            function getTwitchAPI(url) {
+                return $.getJSON(url + (url.indexOf('?') > -1 ? '&' : '?') + "client_id=apbhlybpld3ybc6grv5c118xqpoz01c");
+            }
+
             // Emoticon Code taken from Twitch
             // Yeah, this code looks like shit. We know.
             // It was once a small little object, over time grew fucking huge and supports too much shit now.
@@ -73,10 +98,13 @@
                     return message.replace(/</g,'&lt;').replace(/>/g, '&gt;');
                 },
                 extraEmoteTemplate: function(emote) {
-                    return '<img class="emoticon ' + emote.source + '-emo-' + emote.id + '" src="' + emote['1x'] + '" srcset="' + emote['2x'] + ' 2x" />';
+                    return '<img class="emoticon ' + emote.source + '-emo-' + emote.id + '" src="' + emote['1x'] + '" srcset="' + emote['2x'] + ' 2x, ' + emote['3x'] + ' 4x" />';
                 },
                 emoteTemplate: function(id) {
-                    return '<img class="emoticon ttv-emo-' + id + '" src="//static-cdn.jtvnw.net/emoticons/v1/' + id + '/1.0" srcset="//static-cdn.jtvnw.net/emoticons/v1/' + id + '/2.0 2x" />';
+                    return '<img class="emoticon ttv-emo-' + id + '" src="//static-cdn.jtvnw.net/emoticons/v1/' + id + '/1.0" srcset="//static-cdn.jtvnw.net/emoticons/v1/' + id + '/2.0 2x, //static-cdn.jtvnw.net/emoticons/v1/' + id + '/3.0 4x" />';
+                },
+                cheerTemplate: function(url) {
+                    return '<img class="emoticon cheermote" src="' + url + '" />';
                 },
                 emoticonize: function(message, emotes) {
                     if(!emotes) return [message];
@@ -129,6 +157,31 @@
 
                     return message.replace(emote.code, Chat.extraEmoteTemplate(emote));
                 },
+                getCheer: function(prefix, amount) {
+                    var amounts = Chat.vars.cheers[prefix];
+                    return amounts[
+                        Object.keys(amounts)
+                            .sort(function(a, b) {
+                                return parseInt(b, 10) - parseInt(a, 10);
+                            })
+                            .find(function(a) {
+                                return amount >= a;
+                            })
+                    ];
+                },
+                findCheerInToken: function(sender, token) {
+                    if (!sender.bits) return null;
+                    var cheerPrefixes = Object.keys(Chat.vars.cheers);
+                    var tokenLower = token.toLowerCase();
+                    for (var i = 0; i < cheerPrefixes.length; i++) {
+                        var prefixLower = cheerPrefixes[i].toLowerCase();
+                        if (tokenLower.startsWith(prefixLower)) {
+                            var amount = parseInt(tokenLower.substr(prefixLower.length), 10);
+                            return Chat.getCheer(cheerPrefixes[i], amount);
+                        }
+                    }
+                    return null;
+                },
                 extraMessageTokenize: function(sender, message) {
                     var tokenizedString = message.split(' ');
 
@@ -141,7 +194,11 @@
                             emote = Chat.vars.proEmotes[sender.name][test] || Chat.vars.proEmotes[sender.name][piece];
                         }
 
-                        if(emote) {
+                        var cheer = Chat.findCheerInToken(sender, piece);
+                        
+                        if(cheer) {
+                            piece = Chat.cheerTemplate(cheer);
+                        } else if(emote) {
                             piece = Chat.extraEmoticonize(sender, piece, emote);
                         } else {
                             piece = Chat.escape(piece);
@@ -176,31 +233,15 @@
                     $time.text(new Date().toLocaleTimeString().replace(/^(\d{0,2}):(\d{0,2}):(.*)$/i, '$1:$2'));
                     $newLine.append($time);
 
-                    if(typeof tags.userType === 'string' && tags.userType !== 'normal') {
-                        var $tag = $('<span></span>');
-                        $tag.addClass(tags.userType);
-                        $tag.addClass('tag')
-                        $tag.html('&nbsp;');
-                        $newLine.append($tag);
-                    }
-
-                    if(nick === Chat.vars.channel) {
-                        var $tag = $('<span></span>');
-                        $tag.addClass('broadcaster');
-                        $tag.addClass('tag')
-                        $tag.html('&nbsp;');
-                        $newLine.append($tag);
-                    }
-
-                    ["turbo", "subscriber"].forEach(function(type) {
-                        if(tags[type] === true) {
+                    if(tags.badges) {
+                        tags.badges.forEach(function(badge) {
                             var $tag = $('<span></span>');
-                            $tag.addClass(type);
+                            $tag.addClass(badge.type + '-' + badge.version);
                             $tag.addClass('tag')
                             $tag.html('&nbsp;');
                             $newLine.append($tag);
-                        }
-                    });
+                        });
+                    }
 
                     if(
                         (!Chat.vars.themeNameCC && Chat.vars.style !== 'clear') ||
@@ -256,6 +297,7 @@
                     }
 
                     message = tokenizedMessage.join(' ');
+                    message = twemoji.parse(message);
 
                     $formattedMessage.html(message);
                     $newLine.append($formattedMessage);
@@ -278,7 +320,8 @@
                     }
 
                     Chat.loadEmotes(function() {
-                        Chat.loadSubscriberBadge(function() {
+                        Chat.loadGlobalBadges(function() {
+                            Chat.loadCheers();
                             Chat.insert(null, null, "Connecting to chat server..");
 
                             var socket = new ReconnectingWebSocket('wss://irc-ws.chat.twitch.tv', 'irc', { reconnectInterval: 3000 });
@@ -396,7 +439,8 @@
                                     source: 'bttv',
                                     id: emote.id,
                                     '1x': data.urlTemplate.replace('{{id}}', emote.id).replace('{{image}}','1x'),
-                                    '2x': data.urlTemplate.replace('{{id}}', emote.id).replace('{{image}}','2x')
+                                    '2x': data.urlTemplate.replace('{{id}}', emote.id).replace('{{image}}','2x'),
+                                    '3x': data.urlTemplate.replace('{{id}}', emote.id).replace('{{image}}','3x')
                                 };
                             });
                         });
@@ -447,13 +491,39 @@
                     });
                 },
                 loadSubscriberBadge: function(callback) {
-                    $.getJSON("https://api.twitch.tv/kraken/chat/" + Chat.vars.channel + "/badges?callback=?").done(function(e) {
-                        callback(true);
-                        if(!e.subscriber) return;
-                        var $css = $('<style></style>');
-                        $css.attr('type', 'text/css');
-                        $css.html('.subscriber { background-image: url("' + e.subscriber.image.replace('http:', 'https:') + '"); }');
-                        $("head").append($css);
+                    getTwitchAPI("https://api.twitch.tv/v5/users?login=" + Chat.vars.channel).done(function(e) {
+                        Chat.vars.channelId = e.users[0]._id;
+                        getTwitchAPI("https://badges.twitch.tv/v1/badges/channels/" + e.users[0]._id + "/display").done(function(e) {
+                            transformBadges(e.badge_sets).forEach(function(badge) {
+                                badge.versions.forEach(function(version) {
+                                    $("head").append(tagCSS(badge.type, version.type, version.image_url_4x));
+                                });
+                            });
+                            callback(true);
+                        });
+                    });
+                    
+                },
+                loadGlobalBadges: function(callback) {
+                    getTwitchAPI("https://badges.twitch.tv/v1/badges/global/display").done(function(e) {
+                        transformBadges(e.badge_sets).forEach(function(badge) {
+                            badge.versions.forEach(function(version) {
+                                $("head").append(tagCSS(badge.type, version.type, version.image_url_4x));
+                            });
+                        });
+                        Chat.loadSubscriberBadge(callback);
+                    });
+                },
+                loadCheers: function() {
+                    getTwitchAPI("https://api.twitch.tv/v5/bits/actions?channel_id=" + Chat.vars.channelId).done(function(e) {
+                        try {
+                            e.actions.forEach(function(action) {
+                                var cheer = Chat.vars.cheers[action.prefix] = {};
+                                action.tiers.forEach(function(tier) {
+                                    cheer[tier.min_bits] = tier.images.light.animated['4'];
+                                });
+                            });
+                        } catch(e) {}
                     });
                 },
                 parseTags: function(nick, tags) {
@@ -462,16 +532,11 @@
                     var res = {
                         name: nick,
                         displayName: nick,
-                        userType: 'normal',
                         color: defaultColors[nick.charCodeAt(0) % 15],
-                        subscriber: false,
-                        turbo: false,
-                        emotes: null
+                        emotes: null,
+                        badges: [],
+                        bits: 0
                     };
-
-                    if(tags['user-type'] && typeof tags['user-type'] === 'string') {
-                        res.userType = tags['user-type'];
-                    }
 
                     if(tags['display-name'] && typeof tags['display-name'] === 'string') {
                         res.displayName = tags['display-name'];
@@ -481,16 +546,22 @@
                         res.color = tags.color;
                     }
 
-                    if(tags.subscriber === '1') {
-                        res.subscriber = true;
-                    }
-
-                    if(tags.turbo === '1') {
-                        res.turbo = true;
-                    }
-
                     if(tags.emotes && typeof tags.emotes === 'string') {
                         res.emotes = tags.emotes;
+                    }
+
+                    if(tags.badges && typeof tags.badges === 'string') {
+                        res.badges = tags.badges.split(',').map(function(badge) {
+                            badge = badge.split('/');
+                            return {
+                                type: badge[0],
+                                version: badge[1]
+                            };
+                        });
+                    }
+
+                    if(tags.bits) {
+                        res.bits = +tags.bits;
                     }
 
                     return res;
@@ -564,7 +635,8 @@
                     max_height: 720,
                     extraEmotes: {},
                     proEmotes: {},
-                    spammers: []
+                    spammers: [],
+                    cheers: {}
                 }
             };
 
@@ -577,49 +649,20 @@
                 overflow: hidden;
                 margin: 5px;
             }
-			
-			.left-shape{
-				position: relative;
-				float: left;
-				width: 50%;/*307px;*/
-				height: 100%;/*525px;*/
-				top: 0px;
-				margin-top: 0px;
-				shape-outside: url("Filer_for_KapChat/ClippingMaskChat1.png");
-				shape-image-threshold: 0.5;
-			}
-
-			.right-shape{
-				float: right;
-				width: 50%;
-				height: 100%;
-				/*shape-outside: circle(35%);
-				-webkit-clip-path: circle(15%);*/
-				/*background: blue;*/
-				shape-outside: url("Filer_for_KapChat/ClippingMaskChat2.png");
-				shape-image-threshold: 0.5;
-			}
 
             #chat_box {
-				background-color: transparent;
-				
-				/*Font settings*/
-				font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-				font-style: normal;
-				font-variant: normal;
-				font-weight: normal;
-				font-size: 16px;
-				text-shadow: 
-					1px 1px 0px #000, 1px 0px 0px #000, 1px -1px 0px #000,
-					-1px 1px 0px #000, -1px 0px 0px #000, -1px -1px 0px #000,
-					1px 1px 0px #000, 0px 1px 0px #000, -1px 1px 0px #000, 1px -1px 0px #000, 0px -1px 0px #000, -1px -1px 0px #000 !important;
-
-				position: absolute;
-				overflow: hidden;
-				color: #D3D3D3;
-				
-				width: 614px;
-				height: 525px;
+                background-color: transparent;
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                font-size: 13px;
+                font-style: normal;
+                font-variant: normal;
+                font-weight: normal;
+                position: absolute;
+                overflow: hidden;
+                color: #D3D3D3;
+                border-radius: 4px;
+                width: calc(100% - 10px);
+                /*height: calc(100% - 10px);*/
             }
 
             #chat_box.dark {
@@ -641,6 +684,7 @@
                 text-indent: 21px;
                 background-position: 0 center;
                 background-repeat: no-repeat;
+                background-size: contain;
                 display: inline-block;
                 vertical-align: bottom;
                 height: 18px;
@@ -654,42 +698,6 @@
                 -moz-border-radius: 2px;
                 -webkit-border-radius: 2px;
                 overflow: hidden;
-            }
-
-            .turbo {
-                background-color: #6441a5;
-                background-image: url(//www-cdn.jtvnw.net/images/xarth/badge_turbo.svg);
-                background-size: 100%;
-            }
-
-            .mod {
-                background-color: #34ae0a;
-                background-image: url(//www-cdn.jtvnw.net/images/xarth/badge_mod.svg);
-                background-size: 100%;
-            }
-
-            .broadcaster {
-                background-color: #e71818;
-                background-image: url(//www-cdn.jtvnw.net/images/xarth/badge_broadcaster.svg);
-                background-size: 100%;
-            }
-
-            .staff {
-                background-color: #200f33;
-                background-image: url(//www-cdn.jtvnw.net/images/xarth/badge_staff.svg);
-                background-size: 100%;
-            }
-
-            .admin {
-                background-color: #faaf19;
-                background-image: url(//www-cdn.jtvnw.net/images/xarth/badge_admin.svg);
-                background-size: 100%;
-            }
-
-            .global_mod {
-                background-color: #0C6F20;
-                background-image: url(//www-cdn.jtvnw.net/images/xarth/badge_globalmod.svg);
-                background-size: 100%;
             }
 
             .chat_line {
@@ -713,14 +721,43 @@
             .emoticon {
                 margin-bottom: -7px;
             }
+
+            .cheermote {
+                width: auto;
+                max-height: 28px;
+            }
+
+            .emoji {
+                width: 20px;
+                height: auto;
+            }
 			
-			
+			.right-shape{
+			  float: right;
+			  width: 50%;
+			  height: 525px;
+			}
+
+			.left-shape{
+			  float: left;
+			  width: 50%;
+			  height: 525px;
+			}	
         </style>
-    <link href="Filer_for_KapChat/socialwidgets.css" type="text/css" rel="stylesheet"></head>
+    </head>
     <body>
-        <div class="clear" id="chat_box">
+        <div id="chat_box">
 			<div class="left-shape"></div>
 			<div class="right-shape"></div>
 		</div>
-			
-</body></html>
+        <script>
+            (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+            (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+            m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+            })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+            ga('create', 'UA-39733925-2', 'auto');
+            ga('send', 'pageview');
+        </script>
+    </body>
+</html>
